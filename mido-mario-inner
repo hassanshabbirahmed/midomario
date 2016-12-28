@@ -1,0 +1,60 @@
+#!/bin/bash
+
+if [ $# -ne 2 ]; then
+   echo Usage: $0 INPUT_FILE_NAME OUTPUT_FILE_NAME >& 2
+   exit 1
+fi
+INPFN="$1"
+OUTFN="$2"
+
+if [ "${DEBUG:-}" == "true" ]; then
+    echo
+    printenv | grep CNI
+    set -x
+fi
+
+set -e
+
+echo "${CNI_COMMAND} ${CNI_CONTAINERID} ${CNI_NETNS} ${CNI_IFNAME} ${CNI_ARGS} ${CNI_PATH}"
+
+case "${CNI_COMMAND}" in
+    (ADD)
+    CTR_NETNS=$(docker inspect --format='{{.NetworkSettings.SandboxKey}}' ${CNI_CONTAINERID} | cut -d'/' -f6)
+    CTR_ETH_IP_FIX=$(shuf -i 3-253 -n 1)
+    CTR_ETH_IP="192.168.0.${CTR_ETH_IP_FIX}"
+        ip link add ph-${CTR_NETNS} type veth peer name vv-${CTR_NETNS}
+    ip link set ph-${CTR_NETNS} up
+    ip link set vv-${CTR_NETNS} up
+    ip link set vv-${CTR_NETNS} netns ${CTR_NETNS}
+    ip netns exec ${CTR_NETNS} ip link set dev vv-${CTR_NETNS} name eth0
+    ip netns exec ${CTR_NETNS} ip addr add ${CTR_ETH_IP}/24 dev eth0
+    ip netns exec ${CTR_NETNS} ip link set eth0 up
+    ip netns exec ${CTR_NETNS} ip a
+    ip netns exec ${CTR_NETNS} ip route add default via "192.168.0.1"
+    ip netns exec ${CTR_NETNS} ip route
+    BRIDGE_ID=$(echo ${CNI_ARGS} | cut -d';' -f2 | cut -d'=' -f2)
+    BRIDGE_PORT=$(midonet-cli -e "bridge ${BRIDGE_ID} port create")
+    MIDO_HOST_ID=$(midonet-cli -e "host list" | grep $(hostname) | cut -d' ' -f2)
+    midonet-cli -e "host ${MIDO_HOST_ID} add binding port ${BRIDGE_PORT} interface ph-${CTR_NETNS}"
+        (
+          echo '{'
+          echo '  "cniVersion": "0.1.0",'
+          echo '  "ip4": {'
+          echo '    "ip": "'"${CTR_ETH_IP}/24"'",'
+          echo '    "gateway": "'"198.168.0.1"'"'
+          echo '  }'
+          echo '}'
+        ) > "${OUTFN}"
+        ;;
+    (DEL)
+        (
+          echo '{'
+          echo '  "cniVersion": "0.1.0"'
+          echo '}'
+        ) > "${OUTFN}"
+        ;;
+    (*)
+        echo "Unexpected CNI_COMMAND ($CNI_COMMAND)!" >& 2
+        exit 2
+        ;;
+esac
