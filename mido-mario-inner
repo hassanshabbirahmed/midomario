@@ -22,7 +22,7 @@ case "${CNI_COMMAND}" in
     CTR_NETNS=$(docker inspect --format='{{.NetworkSettings.SandboxKey}}' ${CNI_CONTAINERID} | cut -d'/' -f6)
     CTR_ETH_IP_FIX=$(shuf -i 3-253 -n 1)
     CTR_ETH_IP="192.168.0.${CTR_ETH_IP_FIX}"
-        ip link add ph-${CTR_NETNS} type veth peer name vv-${CTR_NETNS}
+    ip link add ph-${CTR_NETNS} type veth peer name vv-${CTR_NETNS}
     ip link set ph-${CTR_NETNS} up
     ip link set vv-${CTR_NETNS} up
     ip link set vv-${CTR_NETNS} netns ${CTR_NETNS}
